@@ -1,16 +1,30 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
+from datetime import datetime
+
+import customtkinter as ctk
 
 from .. import dao
+from .. import theme
 from ..receipt import show_receipt_window
+from ..widgets import DataTable
+
+PAYMENT_METHODS = ["ငွေသား", "ကတ်", "မိုဘိုင်းငွေပေးချေမှု", "အကြွေးရောင်း"]
+TILE_COLUMNS = 3
+CATEGORY_COLUMNS = 3
 
 
-class PosView(ttk.Frame):
+class PosView(ctk.CTkFrame):
     def __init__(self, parent, app):
-        super().__init__(parent, style="Panel.TFrame", padding=16)
+        super().__init__(parent, fg_color=theme.BG_APP, corner_radius=0)
         self.app = app
         self.cart = []  # list of dicts: product_id, name, unit_price, qty, stock_qty
-        self.selected_category = None
+        self.selected_category_id = None  # None = show all products
+
+        self.code_var = tk.StringVar()
+        self.discount_var = tk.StringVar(value="0")
+        self.payment_method_var = tk.StringVar(value=PAYMENT_METHODS[0])
+        self.tendered_var = tk.StringVar()
 
         self._build_ui()
         self.refresh_products()
@@ -19,200 +33,334 @@ class PosView(ttk.Frame):
     # ---------- UI construction ----------
 
     def _build_ui(self):
-        self.columnconfigure(0, weight=3)
-        self.columnconfigure(1, weight=2)
-        self.rowconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
 
-        header = ttk.Label(self, text="Checkout", style="Heading.TLabel")
-        header.grid(row=0, column=0, sticky="w", pady=(0, 12))
+        self._build_header()
 
-        # ----- Left: product search/list -----
-        left = ttk.Frame(self, style="Card.TFrame", padding=14)
-        left.grid(row=1, column=0, sticky="nsew", padx=(0, 12))
-        left.columnconfigure(0, weight=1)
-        left.rowconfigure(2, weight=1)
+        body = ctk.CTkFrame(self, fg_color="transparent")
+        body.grid(row=1, column=0, sticky="nsew", padx=12, pady=12)
+        body.grid_columnconfigure(0, weight=3)
+        body.grid_columnconfigure(1, weight=4)
+        body.grid_columnconfigure(2, weight=3)
+        body.grid_rowconfigure(0, weight=1)
 
-        search_row = ttk.Frame(left, style="Card.TFrame")
-        search_row.grid(row=0, column=0, sticky="ew")
-        search_row.columnconfigure(0, weight=1)
+        self._build_cart_panel(body)
+        self._build_catalog_panel(body)
+        self._build_control_panel(body)
 
-        self.search_var = tk.StringVar()
-        search_entry = ttk.Entry(search_row, textvariable=self.search_var)
-        search_entry.grid(row=0, column=0, sticky="ew", ipady=4)
-        search_entry.insert(0, "")
-        search_entry.focus_set()
-        search_entry.bind("<Return>", self._on_search_enter)
-        self.search_var.trace_add("write", lambda *a: self.refresh_products())
-        self.search_entry = search_entry
+    def _build_header(self):
+        header = ctk.CTkFrame(self, fg_color=theme.BG_HEADER, corner_radius=0, height=56)
+        header.grid(row=0, column=0, sticky="ew")
+        header.grid_propagate(False)
 
-        self.category_var = tk.StringVar(value="All Categories")
-        self.category_combo = ttk.Combobox(
-            search_row, textvariable=self.category_var, state="readonly", width=18
+        settings = dao.get_settings()
+        self.store_name_label = ctk.CTkLabel(
+            header, text=settings.get("store_name", "သြဇာ"), font=theme.font(20, "bold"), text_color="#ffffff",
         )
-        self.category_combo.grid(row=0, column=1, padx=(8, 0))
-        self.category_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh_products())
+        self.store_name_label.pack(side="left", padx=20)
 
-        hint = ttk.Label(
-            left,
-            text="Scan a barcode, or type a name/SKU and press Enter to add.",
-            style="CardMuted.TLabel",
+        self.clock_label = ctk.CTkLabel(header, font=theme.font(13), text_color=theme.TEXT_LIGHT)
+        self.clock_label.pack(side="right", padx=20)
+        self._tick_clock()
+
+    def _tick_clock(self):
+        self.clock_label.configure(text=datetime.now().strftime("%Y-%m-%d   %H:%M:%S"))
+        self.after(1000, self._tick_clock)
+
+    # ----- left: cart -----
+
+    def _build_cart_panel(self, parent):
+        col = ctk.CTkFrame(parent, fg_color=theme.BG_CARD, corner_radius=theme.RADIUS)
+        col.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        col.grid_columnconfigure(0, weight=1)
+        col.grid_rowconfigure(2, weight=1)
+
+        total_box = ctk.CTkFrame(col, fg_color=theme.BG_TOTAL_BOX, corner_radius=theme.RADIUS)
+        total_box.grid(row=0, column=0, sticky="ew", padx=14, pady=(14, 10))
+        ctk.CTkLabel(total_box, text="ကျသင့်ငွေ", font=theme.font(12), text_color="#9fe6b0").pack(
+            anchor="w", padx=16, pady=(12, 0)
         )
-        hint.grid(row=1, column=0, sticky="w", pady=(6, 6))
+        self.total_value_label = ctk.CTkLabel(
+            total_box, text=dao.format_money(0), font=theme.font(30, "bold"), text_color="#4ee27a"
+        )
+        self.total_value_label.pack(anchor="w", padx=16, pady=(0, 14))
 
-        columns = ("name", "sku", "price", "stock")
-        self.product_tree = ttk.Treeview(left, columns=columns, show="headings", selectmode="browse")
-        self.product_tree.heading("name", text="Product")
-        self.product_tree.heading("sku", text="SKU")
-        self.product_tree.heading("price", text="Price")
-        self.product_tree.heading("stock", text="Stock")
-        self.product_tree.column("name", width=220)
-        self.product_tree.column("sku", width=100, anchor="center")
-        self.product_tree.column("price", width=80, anchor="e")
-        self.product_tree.column("stock", width=70, anchor="center")
-        self.product_tree.grid(row=2, column=0, sticky="nsew")
-        self.product_tree.bind("<Double-1>", self._on_product_double_click)
+        ctk.CTkLabel(col, text="ရောင်းချမည့် ပစ္စည်းများ", font=theme.font(14, "bold"), text_color=theme.TEXT_DARK).grid(
+            row=1, column=0, sticky="w", padx=14, pady=(0, 6)
+        )
 
-        add_btn = ttk.Button(left, text="Add to Cart", command=self._add_selected_product)
-        add_btn.grid(row=3, column=0, sticky="e", pady=(10, 0))
+        columns = [
+            {"key": "name", "heading": "ပစ္စည်းအမည်", "width": 130, "anchor": "w"},
+            {"key": "qty", "heading": "အရေအတွက်", "width": 60, "anchor": "center"},
+            {"key": "price", "heading": "ဈေးနှုန်း", "width": 90, "anchor": "e", "format": dao.format_money},
+            {"key": "total", "heading": "စုစုပေါင်း", "width": 100, "anchor": "e", "format": dao.format_money},
+        ]
+        self.cart_table = DataTable(col, columns=columns, empty_text="ပစ္စည်းစာရင်း ဗလာဖြစ်နေသည်")
+        self.cart_table.grid(row=2, column=0, sticky="nsew", padx=14)
 
-        # ----- Right: cart & payment -----
-        right = ttk.Frame(self, style="Card.TFrame", padding=14)
-        right.grid(row=1, column=1, sticky="nsew")
-        right.columnconfigure(0, weight=1)
-        right.rowconfigure(1, weight=1)
+        line_btns = ctk.CTkFrame(col, fg_color="transparent")
+        line_btns.grid(row=3, column=0, sticky="ew", padx=14, pady=(10, 4))
+        ctk.CTkButton(
+            line_btns, text="+1", width=44, fg_color=theme.ROW_ALT, text_color=theme.TEXT_DARK,
+            hover_color=theme.BORDER, command=lambda: self._change_qty(1),
+        ).pack(side="left")
+        ctk.CTkButton(
+            line_btns, text="-1", width=44, fg_color=theme.ROW_ALT, text_color=theme.TEXT_DARK,
+            hover_color=theme.BORDER, command=lambda: self._change_qty(-1),
+        ).pack(side="left", padx=6)
+        ctk.CTkButton(
+            line_btns, text="ဖျက်ရန်", fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
+            command=self._remove_selected,
+        ).pack(side="left")
 
-        ttk.Label(right, text="Cart", style="CardHeading.TLabel").grid(row=0, column=0, sticky="w")
+        self.cart_count_label = ctk.CTkLabel(col, text="", font=theme.font(11), text_color=theme.TEXT_MUTED)
+        self.cart_count_label.grid(row=4, column=0, sticky="w", padx=14, pady=(0, 12))
 
-        cart_cols = ("name", "qty", "price", "total")
-        self.cart_tree = ttk.Treeview(right, columns=cart_cols, show="headings", selectmode="browse", height=8)
-        self.cart_tree.heading("name", text="Item")
-        self.cart_tree.heading("qty", text="Qty")
-        self.cart_tree.heading("price", text="Price")
-        self.cart_tree.heading("total", text="Total")
-        self.cart_tree.column("name", width=140)
-        self.cart_tree.column("qty", width=50, anchor="center")
-        self.cart_tree.column("price", width=70, anchor="e")
-        self.cart_tree.column("total", width=70, anchor="e")
-        self.cart_tree.grid(row=1, column=0, sticky="nsew", pady=(8, 8))
+    # ----- middle: categories + product tiles -----
 
-        cart_btns = ttk.Frame(right, style="Card.TFrame")
-        cart_btns.grid(row=2, column=0, sticky="ew")
-        ttk.Button(cart_btns, text="+1", style="Secondary.TButton", command=lambda: self._change_qty(1)).pack(side="left")
-        ttk.Button(cart_btns, text="-1", style="Secondary.TButton", command=lambda: self._change_qty(-1)).pack(side="left", padx=6)
-        ttk.Button(cart_btns, text="Remove", style="Danger.TButton", command=self._remove_selected).pack(side="left")
-        ttk.Button(cart_btns, text="Clear", style="Secondary.TButton", command=self._clear_cart).pack(side="right")
+    def _build_catalog_panel(self, parent):
+        col = ctk.CTkFrame(parent, fg_color=theme.BG_CARD, corner_radius=theme.RADIUS)
+        col.grid(row=0, column=1, sticky="nsew", padx=8)
+        col.grid_columnconfigure(0, weight=1)
+        col.grid_rowconfigure(1, weight=1)
 
-        totals = ttk.Frame(right, style="Card.TFrame")
-        totals.grid(row=3, column=0, sticky="ew", pady=(12, 0))
-        totals.columnconfigure(1, weight=1)
+        self.category_chip_frame = ctk.CTkFrame(col, fg_color="transparent")
+        self.category_chip_frame.grid(row=0, column=0, sticky="ew", padx=14, pady=(14, 8))
 
-        ttk.Label(totals, text="Discount:", style="Card.TLabel").grid(row=0, column=0, sticky="w")
-        self.discount_var = tk.StringVar(value="0")
-        discount_entry = ttk.Entry(totals, textvariable=self.discount_var, width=10)
-        discount_entry.grid(row=0, column=1, sticky="e")
-        self.discount_var.trace_add("write", lambda *a: self.refresh_cart(recompute_only=True))
+        self.tiles_frame = ctk.CTkScrollableFrame(col, fg_color="transparent")
+        self.tiles_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
 
-        self.subtotal_label = ttk.Label(totals, text="Subtotal: $0.00", style="Card.TLabel")
-        self.subtotal_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        self.tax_label = ttk.Label(totals, text="Tax: $0.00", style="Card.TLabel")
-        self.tax_label.grid(row=2, column=0, columnspan=2, sticky="w")
-        self.total_label = ttk.Label(totals, text="Total: $0.00", style="Total.TLabel")
-        self.total_label.grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
+    # ----- right: keypad, functions, payment -----
 
-        payment = ttk.Frame(right, style="Card.TFrame")
-        payment.grid(row=4, column=0, sticky="ew", pady=(14, 0))
-        payment.columnconfigure(1, weight=1)
+    def _build_control_panel(self, parent):
+        col = ctk.CTkFrame(parent, fg_color=theme.BG_CARD, corner_radius=theme.RADIUS)
+        col.grid(row=0, column=2, sticky="nsew", padx=(8, 0))
+        col.grid_columnconfigure(0, weight=1)
 
-        ttk.Label(payment, text="Payment:", style="Card.TLabel").grid(row=0, column=0, sticky="w")
-        self.payment_method_var = tk.StringVar(value="Cash")
-        payment_combo = ttk.Combobox(
-            payment, textvariable=self.payment_method_var, state="readonly",
-            values=["Cash", "Card", "Mobile"], width=12,
+        pad = {"padx": 14}
+
+        ctk.CTkLabel(col, text="ဘားကုဒ် / ကုဒ်နံပါတ်", font=theme.font(13, "bold"), text_color=theme.TEXT_DARK).grid(
+            row=0, column=0, sticky="w", **pad, pady=(14, 4)
+        )
+        code_entry = ctk.CTkEntry(
+            col, textvariable=self.code_var, font=theme.font(18, "bold"), justify="right", height=42,
+        )
+        code_entry.grid(row=1, column=0, sticky="ew", **pad, pady=(0, 10))
+        code_entry.bind("<Return>", lambda e: self._add_by_code())
+
+        keypad = ctk.CTkFrame(col, fg_color="transparent")
+        keypad.grid(row=2, column=0, sticky="ew", **pad)
+        for c in range(3):
+            keypad.grid_columnconfigure(c, weight=1)
+        digit_rows = [("7", "8", "9"), ("4", "5", "6"), ("1", "2", "3")]
+        for r, row_digits in enumerate(digit_rows):
+            for c, d in enumerate(row_digits):
+                ctk.CTkButton(
+                    keypad, text=d, font=theme.font(18, "bold"), height=44,
+                    fg_color=theme.ROW_ALT, text_color=theme.TEXT_DARK, hover_color=theme.BORDER,
+                    command=lambda d=d: self._keypad_press(d),
+                ).grid(row=r, column=c, sticky="nsew", padx=3, pady=3)
+        ctk.CTkButton(
+            keypad, text="⌫", font=theme.font(16, "bold"), height=44,
+            fg_color=theme.ROW_ALT, text_color=theme.TEXT_DARK, hover_color=theme.BORDER,
+            command=self._keypad_backspace,
+        ).grid(row=3, column=0, sticky="nsew", padx=3, pady=3)
+        ctk.CTkButton(
+            keypad, text="0", font=theme.font(18, "bold"), height=44,
+            fg_color=theme.ROW_ALT, text_color=theme.TEXT_DARK, hover_color=theme.BORDER,
+            command=lambda: self._keypad_press("0"),
+        ).grid(row=3, column=1, sticky="nsew", padx=3, pady=3)
+        ctk.CTkButton(
+            keypad, text=".", font=theme.font(18, "bold"), height=44,
+            fg_color=theme.ROW_ALT, text_color=theme.TEXT_DARK, hover_color=theme.BORDER,
+            command=lambda: self._keypad_press("."),
+        ).grid(row=3, column=2, sticky="nsew", padx=3, pady=3)
+
+        keypad_actions = ctk.CTkFrame(col, fg_color="transparent")
+        keypad_actions.grid(row=3, column=0, sticky="ew", **pad, pady=(8, 12))
+        keypad_actions.grid_columnconfigure(0, weight=1)
+        keypad_actions.grid_columnconfigure(1, weight=1)
+        ctk.CTkButton(
+            keypad_actions, text="ထည့်ရန်", fg_color=theme.ACCENT_SOFT, text_color=theme.ACCENT_HOVER,
+            hover_color=theme.BORDER, command=self._add_by_code,
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        ctk.CTkButton(
+            keypad_actions, text="အရေအတွက်သတ်မှတ်", fg_color=theme.ACCENT_SOFT, text_color=theme.ACCENT_HOVER,
+            hover_color=theme.BORDER, command=self._apply_qty_from_keypad,
+        ).grid(row=0, column=1, sticky="ew", padx=(4, 0))
+
+        functions = ctk.CTkFrame(col, fg_color="transparent")
+        functions.grid(row=4, column=0, sticky="ew", **pad, pady=(0, 12))
+        functions.grid_columnconfigure(0, weight=1)
+        functions.grid_columnconfigure(1, weight=1)
+        func_defs = [
+            ("ပစ္စည်းရှာဖွေရန်", self._open_item_lookup),
+            ("လျှော့စျေးထည့်ရန်", self._open_discount_dialog),
+            ("ငွေတိုက်ဖွင့်ရန်", self._no_sale),
+            ("ရောင်းချမှုပယ်ဖျက်", self._clear_cart_confirm),
+            ("ဘောက်ချာ ပြန်ထုတ်ရန်", self._reprint_last_receipt),
+        ]
+        for i, (label, cmd) in enumerate(func_defs):
+            r, c = divmod(i, 2)
+            ctk.CTkButton(
+                functions, text=label, font=theme.font(11, "bold"), height=40,
+                fg_color="#3a4256", hover_color="#4c5670", command=cmd,
+            ).grid(row=r, column=c, sticky="nsew", padx=3, pady=3)
+
+        payment = ctk.CTkFrame(col, fg_color="transparent")
+        payment.grid(row=5, column=0, sticky="ew", **pad)
+        payment.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(payment, text="ငွေပေးချေမှုပုံစံ", font=theme.font(12), text_color=theme.TEXT_DARK).grid(
+            row=0, column=0, sticky="w"
+        )
+        payment_combo = ctk.CTkComboBox(
+            payment, values=PAYMENT_METHODS, variable=self.payment_method_var, state="readonly", width=150,
+            command=lambda choice: self._update_tendered_state(),
         )
         payment_combo.grid(row=0, column=1, sticky="e")
-        payment_combo.bind("<<ComboboxSelected>>", lambda e: self._update_tendered_state())
 
-        ttk.Label(payment, text="Tendered:", style="Card.TLabel").grid(row=1, column=0, sticky="w", pady=(6, 0))
-        self.tendered_var = tk.StringVar(value="")
-        self.tendered_entry = ttk.Entry(payment, textvariable=self.tendered_var, width=10)
-        self.tendered_entry.grid(row=1, column=1, sticky="e", pady=(6, 0))
-
-        self.change_label = ttk.Label(payment, text="", style="CardMuted.TLabel")
-        self.change_label.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        ctk.CTkLabel(payment, text="ပေးချေငွေ", font=theme.font(12), text_color=theme.TEXT_DARK).grid(
+            row=1, column=0, sticky="w", pady=(8, 0)
+        )
+        self.tendered_entry = ctk.CTkEntry(payment, textvariable=self.tendered_var, width=140, justify="right")
+        self.tendered_entry.grid(row=1, column=1, sticky="e", pady=(8, 0))
         self.tendered_var.trace_add("write", lambda *a: self._update_change())
 
-        complete_btn = ttk.Button(
-            right, text="Complete Sale", style="Success.TButton", command=self._complete_sale
-        )
-        complete_btn.grid(row=5, column=0, sticky="ew", pady=(16, 0))
+        self.change_label = ctk.CTkLabel(payment, text="", font=theme.font(11), text_color=theme.TEXT_MUTED)
+        self.change_label.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
-    # ---------- Data refresh ----------
+        discount_row = ctk.CTkFrame(col, fg_color="transparent")
+        discount_row.grid(row=6, column=0, sticky="ew", **pad, pady=(6, 0))
+        ctk.CTkLabel(discount_row, text="လျှော့စျေး -", font=theme.font(11), text_color=theme.TEXT_MUTED).pack(side="left")
+        self.discount_display = ctk.CTkLabel(discount_row, text=dao.format_money(0), font=theme.font(11), text_color=theme.TEXT_MUTED)
+        self.discount_display.pack(side="left", padx=(6, 0))
+
+        ctk.CTkButton(
+            col, text="ငွေရှင်းမည်", font=theme.font(18, "bold"), height=56,
+            fg_color=theme.SUCCESS, hover_color=theme.SUCCESS_HOVER, corner_radius=theme.RADIUS,
+            command=self._complete_sale,
+        ).grid(row=7, column=0, sticky="ew", **pad, pady=(14, 16))
+
+    # ---------- lifecycle / data refresh ----------
 
     def on_show(self):
-        self.refresh_products()
+        settings = dao.get_settings()
+        self.store_name_label.configure(text=settings.get("store_name", "သြဇာ"))
         self._refresh_categories()
+        self.refresh_products()
 
     def _refresh_categories(self):
         cats = dao.list_categories()
-        names = ["All Categories"] + [c["name"] for c in cats]
-        self.category_combo["values"] = names
-        if self.category_var.get() not in names:
-            self.category_var.set("All Categories")
-        self._category_map = {c["name"]: c["id"] for c in cats}
+        for w in self.category_chip_frame.winfo_children():
+            w.destroy()
+        for c in range(CATEGORY_COLUMNS):
+            self.category_chip_frame.grid_columnconfigure(c, weight=1)
+
+        all_selected = self.selected_category_id is None
+        ctk.CTkButton(
+            self.category_chip_frame, text="အားလုံး", font=theme.font(13, "bold"), height=52,
+            fg_color=theme.ACCENT if all_selected else theme.ROW_ALT,
+            text_color="#ffffff" if all_selected else theme.TEXT_DARK,
+            hover_color=theme.ACCENT_HOVER if all_selected else theme.BORDER,
+            corner_radius=theme.RADIUS, command=lambda: self._select_category(None),
+        ).grid(row=0, column=0, sticky="nsew", padx=3, pady=3)
+
+        for idx, cat in enumerate(cats, start=1):
+            r, c = divmod(idx, CATEGORY_COLUMNS)
+            selected = self.selected_category_id == cat["id"]
+            color = theme.ACCENT if selected else theme.CATEGORY_COLORS[(idx - 1) % len(theme.CATEGORY_COLORS)]
+            ctk.CTkButton(
+                self.category_chip_frame, text=cat["name"], font=theme.font(13, "bold"), height=52,
+                fg_color=color, text_color="#ffffff" if selected else theme.TEXT_DARK,
+                hover_color=theme.ACCENT_HOVER if selected else theme.CATEGORY_HOVER,
+                corner_radius=theme.RADIUS, command=lambda cid=cat["id"]: self._select_category(cid),
+            ).grid(row=r, column=c, sticky="nsew", padx=3, pady=3)
+
+    def _select_category(self, category_id):
+        self.selected_category_id = category_id
+        self._refresh_categories()
+        self.refresh_products()
 
     def refresh_products(self):
-        if not hasattr(self, "_category_map"):
-            self._refresh_categories()
-        search = self.search_var.get().strip()
-        cat_name = self.category_var.get()
-        cat_id = self._category_map.get(cat_name) if cat_name != "All Categories" else None
+        for w in self.tiles_frame.winfo_children():
+            w.destroy()
+        for c in range(TILE_COLUMNS):
+            self.tiles_frame.grid_columnconfigure(c, weight=1)
 
-        for row in self.product_tree.get_children():
-            self.product_tree.delete(row)
-
-        symbol = dao.get_setting("currency_symbol", "$")
-        for p in dao.list_products(search=search or None, category_id=cat_id):
-            self.product_tree.insert(
-                "", "end", iid=str(p["id"]),
-                values=(p["name"], p["sku"] or "", f"{symbol}{p['price']:.2f}", p["stock_qty"]),
+        products = dao.list_products(category_id=self.selected_category_id)
+        for idx, p in enumerate(products):
+            r, c = divmod(idx, TILE_COLUMNS)
+            label = f"{p['name']}\n{dao.format_money(p['price'])}"
+            out_of_stock = p["stock_qty"] <= 0
+            btn = ctk.CTkButton(
+                self.tiles_frame, text=label, font=theme.font(12, "bold"), height=76,
+                fg_color=theme.BG_CARD if not out_of_stock else theme.ROW_ALT,
+                text_color=theme.TEXT_DARK if not out_of_stock else theme.TEXT_MUTED,
+                hover_color=theme.ROW_ALT if not out_of_stock else theme.ROW_ALT,
+                border_width=1, border_color=theme.BORDER, corner_radius=theme.RADIUS,
+                state="disabled" if out_of_stock else "normal",
+                command=lambda prod=p: self._add_product_to_cart(prod),
             )
+            btn.grid(row=r, column=c, sticky="nsew", padx=4, pady=4)
 
-    # ---------- Search / scan ----------
+    # ---------- keypad ----------
 
-    def _on_search_enter(self, event):
-        code = self.search_var.get().strip()
+    def _keypad_press(self, ch):
+        self.code_var.set(self.code_var.get() + ch)
+
+    def _keypad_backspace(self):
+        self.code_var.set(self.code_var.get()[:-1])
+
+    def _add_by_code(self):
+        code = self.code_var.get().strip()
         if not code:
             return
         product = dao.find_by_barcode_or_sku(code)
         if product:
             self._add_product_to_cart(product)
-            self.search_var.set("")
+            self.code_var.set("")
         else:
-            children = self.product_tree.get_children()
-            if len(children) == 1:
-                self.product_tree.selection_set(children[0])
-                self._add_selected_product()
+            messagebox.showinfo("မတွေ့ပါ", f"ကုဒ် '{code}' နှင့် ကိုက်ညီသော ပစ္စည်းကို မတွေ့ပါ။")
 
-    def _on_product_double_click(self, event):
-        self._add_selected_product()
-
-    def _add_selected_product(self):
-        selection = self.product_tree.selection()
-        if not selection:
+    def _apply_qty_from_keypad(self):
+        idx = self.cart_table.selected_index
+        if idx is None or idx >= len(self.cart):
+            messagebox.showinfo("ရွေးချယ်ထားခြင်းမရှိပါ", "အရေအတွက်ပြောင်းရန် ပစ္စည်းစာရင်းမှ တစ်ခုကို အရင်ရွေးပါ။")
             return
-        product_id = int(selection[0])
-        product = dao.get_product(product_id)
-        if product:
-            self._add_product_to_cart(product)
+        raw = self.code_var.get().strip()
+        try:
+            qty = int(float(raw))
+        except ValueError:
+            messagebox.showwarning("မှားယွင်းနေပါသည်", "ဂဏန်းအမှန်ကို ရိုက်ထည့်ပါ။")
+            return
+        item = self.cart[idx]
+        if qty <= 0:
+            self.cart.pop(idx)
+        elif qty > item["stock_qty"]:
+            messagebox.showwarning("ကုန်ပစ္စည်း မလုံလောက်ပါ", f"လက်ကျန် {item['stock_qty']} ခုသာ ရှိပါသည်။")
+            return
+        else:
+            item["qty"] = qty
+        self.code_var.set("")
+        self.refresh_cart()
+
+    # ---------- item lookup dialog ----------
+
+    def _open_item_lookup(self):
+        ItemLookupDialog(self, on_pick=self._add_product_to_cart)
+
+    # ---------- cart manipulation ----------
 
     def _add_product_to_cart(self, product):
         if product["stock_qty"] <= 0:
-            messagebox.showwarning("Out of stock", f"{product['name']} has no stock available.")
+            messagebox.showwarning("ပစ္စည်းကုန်နေပါသည်", f"{product['name']} လက်ကျန်မရှိတော့ပါ။")
             return
         for item in self.cart:
             if item["product_id"] == product["id"]:
                 if item["qty"] + 1 > product["stock_qty"]:
-                    messagebox.showwarning("Insufficient stock", f"Only {product['stock_qty']} left.")
+                    messagebox.showwarning("ကုန်ပစ္စည်း မလုံလောက်ပါ", f"လက်ကျန် {product['stock_qty']} ခုသာ ရှိပါသည်။")
                     return
                 item["qty"] += 1
                 self.refresh_cart()
@@ -226,16 +374,8 @@ class PosView(ttk.Frame):
         })
         self.refresh_cart()
 
-    # ---------- Cart manipulation ----------
-
-    def _selected_cart_index(self):
-        selection = self.cart_tree.selection()
-        if not selection:
-            return None
-        return int(selection[0])
-
     def _change_qty(self, delta):
-        idx = self._selected_cart_index()
+        idx = self.cart_table.selected_index
         if idx is None or idx >= len(self.cart):
             return
         item = self.cart[idx]
@@ -243,18 +383,24 @@ class PosView(ttk.Frame):
         if new_qty <= 0:
             self.cart.pop(idx)
         elif new_qty > item["stock_qty"]:
-            messagebox.showwarning("Insufficient stock", f"Only {item['stock_qty']} left.")
+            messagebox.showwarning("ကုန်ပစ္စည်း မလုံလောက်ပါ", f"လက်ကျန် {item['stock_qty']} ခုသာ ရှိပါသည်။")
             return
         else:
             item["qty"] = new_qty
         self.refresh_cart()
 
     def _remove_selected(self):
-        idx = self._selected_cart_index()
+        idx = self.cart_table.selected_index
         if idx is None or idx >= len(self.cart):
             return
         self.cart.pop(idx)
         self.refresh_cart()
+
+    def _clear_cart_confirm(self):
+        if not self.cart:
+            return
+        if messagebox.askyesno("ရောင်းချမှုပယ်ဖျက်ရန်", "လက်ရှိစာရင်းအားလုံးကို ဖျက်မှာ သေချာပါသလား?"):
+            self._clear_cart()
 
     def _clear_cart(self):
         self.cart = []
@@ -262,7 +408,10 @@ class PosView(ttk.Frame):
         self.tendered_var.set("")
         self.refresh_cart()
 
-    # ---------- Totals ----------
+    def _no_sale(self):
+        messagebox.showinfo("ငွေတိုက်", "ငွေတိုက်ကို ဖွင့်လိုက်ပါပြီ။")
+
+    # ---------- totals ----------
 
     def _safe_float(self, value, default=0.0):
         try:
@@ -281,25 +430,22 @@ class PosView(ttk.Frame):
         return subtotal, discount, tax, total
 
     def refresh_cart(self, recompute_only=False):
-        symbol = dao.get_setting("currency_symbol", "$")
         if not recompute_only:
-            for row in self.cart_tree.get_children():
-                self.cart_tree.delete(row)
-            for idx, item in enumerate(self.cart):
-                line_total = item["unit_price"] * item["qty"]
-                self.cart_tree.insert(
-                    "", "end", iid=str(idx),
-                    values=(item["name"], item["qty"], f"{symbol}{item['unit_price']:.2f}", f"{symbol}{line_total:.2f}"),
-                )
+            rows = [
+                {"name": item["name"], "qty": item["qty"], "price": item["unit_price"], "total": item["unit_price"] * item["qty"]}
+                for item in self.cart
+            ]
+            self.cart_table.set_rows(rows)
 
         subtotal, discount, tax, total = self.compute_totals()
-        self.subtotal_label.configure(text=f"Subtotal: {symbol}{subtotal:.2f}")
-        self.tax_label.configure(text=f"Tax: {symbol}{tax:.2f}")
-        self.total_label.configure(text=f"Total: {symbol}{total:.2f}")
+        self.total_value_label.configure(text=dao.format_money(total))
+        self.discount_display.configure(text=dao.format_money(discount))
+        total_qty = sum(item["qty"] for item in self.cart)
+        self.cart_count_label.configure(text=f"စုစုပေါင်း ပစ္စည်းအရေအတွက်: {total_qty}")
         self._update_change()
 
     def _update_tendered_state(self):
-        if self.payment_method_var.get() != "Cash":
+        if self.payment_method_var.get() != PAYMENT_METHODS[0]:
             self.tendered_var.set("")
 
     def _update_change(self):
@@ -307,30 +453,59 @@ class PosView(ttk.Frame):
         tendered = self._safe_float(self.tendered_var.get(), None) if self.tendered_var.get() else None
         if tendered is not None:
             change = round(tendered - total, 2)
-            self.change_label.configure(text=f"Change due: {dao.get_setting('currency_symbol', '$')}{change:.2f}")
+            self.change_label.configure(text=f"ပြန်အမ်းငွေ - {dao.format_money(change)}")
         else:
             self.change_label.configure(text="")
 
-    # ---------- Complete sale ----------
+    # ---------- discount ----------
+
+    def _open_discount_dialog(self):
+        DiscountDialog(self, current=self.discount_var.get(), on_apply=self._set_discount)
+
+    def _set_discount(self, value):
+        self.discount_var.set(value)
+        self.refresh_cart(recompute_only=True)
+
+    # ---------- receipts ----------
+
+    def _reprint_last_receipt(self):
+        sale, items = dao.get_last_sale()
+        if not sale:
+            messagebox.showinfo("ဘောက်ချာမရှိပါ", "ယခင်ရောင်းချမှု မရှိသေးပါ။")
+            return
+        show_receipt_window(self, sale, items)
+
+    # ---------- complete sale ----------
 
     def _complete_sale(self):
         if not self.cart:
-            messagebox.showinfo("Empty cart", "Add at least one item before completing the sale.")
+            messagebox.showinfo("ပစ္စည်းမရှိပါ", "ငွေရှင်းမည့်ပစ္စည်းအနည်းဆုံး တစ်ခုထည့်ပါ။")
             return
 
         subtotal, discount, tax, total = self.compute_totals()
         payment_method = self.payment_method_var.get()
+
+        if payment_method == "အကြွေးရောင်း":
+            CreditSaleDialog(
+                self, total,
+                on_complete=lambda customer_id: self._finalize_sale(payment_method, None, customer_id),
+            )
+            return
+
         amount_tendered = None
-        if payment_method == "Cash":
+        if payment_method == "ငွေသား":
             amount_tendered = self._safe_float(self.tendered_var.get(), None) if self.tendered_var.get() else None
             if amount_tendered is None or amount_tendered < total:
-                messagebox.showwarning("Insufficient payment", "Enter an amount tendered that covers the total.")
+                messagebox.showwarning("ငွေမလုံလောက်ပါ", "ကျသင့်ငွေအပြည့်ရှိအောင် ပေးချေငွေကို ထည့်ပါ။")
                 return
 
-        tax_rate = self._safe_float(dao.get_setting("tax_rate", "0"), 0.0)
-        sale = dao.create_sale(self.cart, discount, tax_rate, payment_method, amount_tendered)
+        self._finalize_sale(payment_method, amount_tendered, None)
 
-        from datetime import datetime
+    def _finalize_sale(self, payment_method, amount_tendered, customer_id):
+        subtotal, discount, tax, total = self.compute_totals()
+        tax_rate = self._safe_float(dao.get_setting("tax_rate", "0"), 0.0)
+        sale = dao.create_sale(self.cart, discount, tax_rate, payment_method, amount_tendered, customer_id)
+
         sale_display = dict(sale)
         sale_display["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
         _, items = dao.get_sale(sale["id"])
@@ -342,3 +517,209 @@ class PosView(ttk.Frame):
         self.tendered_var.set("")
         self.refresh_cart()
         self.refresh_products()
+
+
+class ItemLookupDialog(ctk.CTkToplevel):
+    """Full product search — used when an item isn't visible among the category tiles."""
+
+    def __init__(self, parent, on_pick):
+        super().__init__(parent)
+        self.on_pick = on_pick
+        self.title("ပစ္စည်းရှာဖွေရန်")
+        self.geometry("460x540")
+        self.configure(fg_color=theme.BG_APP)
+
+        frame = ctk.CTkFrame(self, fg_color="transparent")
+        frame.pack(fill="both", expand=True, padx=16, pady=16)
+
+        self.search_var = tk.StringVar()
+        search_entry = ctk.CTkEntry(frame, textvariable=self.search_var, placeholder_text="ရှာဖွေရန်...", height=38)
+        search_entry.pack(fill="x", pady=(0, 10))
+        search_entry.focus_set()
+        self.search_var.trace_add("write", lambda *a: self._refresh())
+
+        columns = [
+            {"key": "name", "heading": "ပစ္စည်းအမည်", "width": 180, "anchor": "w"},
+            {"key": "sku", "heading": "ကုဒ်", "width": 80, "anchor": "center"},
+            {"key": "price", "heading": "ဈေးနှုန်း", "width": 90, "anchor": "e", "format": dao.format_money},
+            {"key": "stock_qty", "heading": "လက်ကျန်", "width": 70, "anchor": "center"},
+        ]
+        self.table = DataTable(frame, columns=columns, height=340, on_double_click=self._pick)
+        self.table.pack(fill="both", expand=True)
+
+        btn_row = ctk.CTkFrame(frame, fg_color="transparent")
+        btn_row.pack(fill="x", pady=(10, 0))
+        ctk.CTkButton(btn_row, text="ပိတ်ရန်", fg_color=theme.ROW_ALT, text_color=theme.TEXT_DARK,
+                      hover_color=theme.BORDER, command=self.destroy).pack(side="right")
+        ctk.CTkButton(btn_row, text="ထည့်ရန်", fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER,
+                      command=self._pick_selected).pack(side="right", padx=6)
+
+        self._refresh()
+        self.transient(parent)
+        self.grab_set()
+
+    def _refresh(self):
+        search = self.search_var.get().strip()
+        self.table.set_rows(dao.list_products(search=search or None))
+
+    def _pick(self, row):
+        self.on_pick(row)
+
+    def _pick_selected(self):
+        row = self.table.get_selected()
+        if row:
+            self.on_pick(row)
+
+
+class DiscountDialog(ctk.CTkToplevel):
+    def __init__(self, parent, current, on_apply):
+        super().__init__(parent)
+        self.on_apply = on_apply
+        self.title("လျှော့စျေးထည့်ရန်")
+        self.geometry("300x180")
+        self.resizable(False, False)
+        self.configure(fg_color=theme.BG_APP)
+
+        frame = ctk.CTkFrame(self, fg_color="transparent")
+        frame.pack(fill="both", expand=True, padx=16, pady=16)
+
+        ctk.CTkLabel(frame, text="လျှော့စျေးပမာဏ", text_color=theme.TEXT_DARK).pack(anchor="w")
+        self.value_var = tk.StringVar(value=current)
+        entry = ctk.CTkEntry(frame, textvariable=self.value_var, justify="right", height=38)
+        entry.pack(fill="x", pady=(4, 14))
+        entry.focus_set()
+        entry.select_range(0, "end")
+
+        btn_row = ctk.CTkFrame(frame, fg_color="transparent")
+        btn_row.pack(fill="x")
+        ctk.CTkButton(btn_row, text="မလုပ်တော့ပါ", fg_color=theme.ROW_ALT, text_color=theme.TEXT_DARK,
+                      hover_color=theme.BORDER, command=self.destroy).pack(side="right")
+        ctk.CTkButton(btn_row, text="သိမ်းမည်", fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER,
+                      command=self._apply).pack(side="right", padx=6)
+
+        self.transient(parent)
+        self.grab_set()
+
+    def _apply(self):
+        try:
+            float(self.value_var.get())
+        except ValueError:
+            messagebox.showwarning("မှားယွင်းနေပါသည်", "ဂဏန်းအမှန်ကို ရိုက်ထည့်ပါ။")
+            return
+        self.on_apply(self.value_var.get())
+        self.destroy()
+
+
+class CreditSaleDialog(ctk.CTkToplevel):
+    """Pick (or settle) the customer a credit sale should be billed to.
+
+    Enforces the store's tab policy: a customer with any outstanding
+    balance must be paid down to zero before a new credit sale is allowed.
+    """
+
+    def __init__(self, parent, total, on_complete):
+        super().__init__(parent)
+        self.on_complete = on_complete
+        self.selected_customer_id = None
+
+        self.title("အကြွေးရောင်း")
+        self.geometry("440x540")
+        self.resizable(False, False)
+        self.configure(fg_color=theme.BG_APP)
+
+        frame = ctk.CTkFrame(self, fg_color="transparent")
+        frame.pack(fill="both", expand=True, padx=16, pady=16)
+
+        ctk.CTkLabel(
+            frame, text=f"ကျသင့်ငွေ - {dao.format_money(total)}", font=theme.font(14, "bold"), text_color=theme.TEXT_DARK
+        ).pack(anchor="w", pady=(0, 10))
+
+        self.search_var = tk.StringVar()
+        search_entry = ctk.CTkEntry(frame, textvariable=self.search_var, placeholder_text="ဖောက်သည်ရှာရန်...", height=38)
+        search_entry.pack(fill="x", pady=(0, 10))
+        search_entry.focus_set()
+        self.search_var.trace_add("write", lambda *a: self._refresh_list())
+
+        columns = [
+            {"key": "name", "heading": "ဖောက်သည်", "width": 150, "anchor": "w"},
+            {"key": "phone", "heading": "ဖုန်းနံပါတ်", "width": 100, "anchor": "center"},
+            {"key": "credit_balance", "heading": "ကျန်ငွေ", "width": 90, "anchor": "e", "format": dao.format_money},
+        ]
+        self.table = DataTable(frame, columns=columns, height=220, on_select=lambda row: self._on_select(row))
+        self.table.pack(fill="both", expand=True)
+
+        self.balance_label = ctk.CTkLabel(
+            frame, text="အထက်မှ ဖောက်သည်တစ်ဦးကို ရွေးပါ။", wraplength=380, justify="left", text_color=theme.TEXT_DARK
+        )
+        self.balance_label.pack(anchor="w", pady=(10, 4))
+
+        settle_row = ctk.CTkFrame(frame, fg_color="transparent")
+        settle_row.pack(fill="x")
+        ctk.CTkLabel(settle_row, text="ပေးချေမည့်ငွေ", text_color=theme.TEXT_DARK).pack(side="left")
+        self.settle_var = tk.StringVar()
+        ctk.CTkEntry(settle_row, textvariable=self.settle_var, width=100).pack(side="left", padx=(6, 6))
+        ctk.CTkButton(
+            settle_row, text="ငွေပေးချေမည်", fg_color=theme.ROW_ALT, text_color=theme.TEXT_DARK,
+            hover_color=theme.BORDER, command=self._apply_payment,
+        ).pack(side="left")
+
+        btn_row = ctk.CTkFrame(frame, fg_color="transparent")
+        btn_row.pack(fill="x", pady=(16, 0))
+        ctk.CTkButton(btn_row, text="မလုပ်တော့ပါ", fg_color=theme.ROW_ALT, text_color=theme.TEXT_DARK,
+                      hover_color=theme.BORDER, command=self.destroy).pack(side="right")
+        ctk.CTkButton(btn_row, text="အကြွေးရောင်းချမည်", fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER,
+                      command=self._complete).pack(side="right", padx=6)
+
+        self._refresh_list()
+        self.transient(parent)
+        self.grab_set()
+
+    def _refresh_list(self):
+        search = self.search_var.get().strip()
+        self.table.set_rows(dao.list_customers(search=search or None), row_tag=lambda r: "warn" if r["credit_balance"] > 0 else None)
+
+    def _on_select(self, row):
+        self.selected_customer_id = row["id"]
+        customer = dao.get_customer(self.selected_customer_id)
+        if customer["credit_balance"] > 0:
+            self.balance_label.configure(
+                text=f"{customer['name']} သည် ယခင်ဝယ်ယူမှုမှ {dao.format_money(customer['credit_balance'])} ကျန်ရှိနေပါသည် — "
+                     "အကြွေးအသစ်မရောင်းမီ ထိုငွေအား ဦးစွာရှင်းရပါမည်။"
+            )
+            self.settle_var.set(f"{customer['credit_balance']:.0f}")
+        else:
+            self.balance_label.configure(text=f"{customer['name']} တွင် ကျန်ငွေမရှိပါ။")
+            self.settle_var.set("")
+
+    def _apply_payment(self):
+        if self.selected_customer_id is None:
+            messagebox.showinfo("ဖောက်သည်မရွေးရသေးပါ", "ဖောက်သည်တစ်ဦးကို အရင်ရွေးပါ။")
+            return
+        try:
+            amount = float(self.settle_var.get())
+        except ValueError:
+            messagebox.showwarning("မှားယွင်းနေပါသည်", "ငွေပမာဏအမှန်ကို ရိုက်ထည့်ပါ။")
+            return
+        if amount <= 0:
+            messagebox.showwarning("မှားယွင်းနေပါသည်", "ငွေပမာဏသည် သုညထက်ကြီးရပါမည်။")
+            return
+        dao.record_customer_payment(self.selected_customer_id, amount, "အကြွေးရောင်းအသစ်မတိုင်မီ ငွေပေးချေမှု")
+        customer_id = self.selected_customer_id
+        self._refresh_list()
+        self.selected_customer_id = customer_id
+        self._on_select({"id": customer_id})
+
+    def _complete(self):
+        if self.selected_customer_id is None:
+            messagebox.showinfo("ဖောက်သည်မရွေးရသေးပါ", "အကြွေးရောင်းအတွက် ဖောက်သည်တစ်ဦးကို ရွေးပါ။")
+            return
+        customer = dao.get_customer(self.selected_customer_id)
+        if customer["credit_balance"] > 0:
+            messagebox.showwarning(
+                "ကျန်ငွေရှိနေပါသည်",
+                f"{customer['name']} သည် အကြွေးအသစ်မဝယ်မီ ကျန်ငွေ {dao.format_money(customer['credit_balance'])} ကို ဦးစွာပေးချေရပါမည်။",
+            )
+            return
+        customer_id = self.selected_customer_id
+        self.destroy()
+        self.on_complete(customer_id)

@@ -28,6 +28,12 @@ def update_settings(values: dict):
     conn.commit()
 
 
+def format_money(value):
+    """Format an amount using the store's currency symbol, e.g. '1,500 Ks'."""
+    symbol = get_setting("currency_symbol", "Ks")
+    return f"{value:,.0f} {symbol}"
+
+
 # ---------- Categories ----------
 
 def list_categories():
@@ -153,6 +159,66 @@ def low_stock_products():
     ).fetchall()
 
 
+# ---------- Customers ----------
+
+def list_customers(search=None, active_only=True):
+    conn = get_connection()
+    query = "SELECT * FROM customers WHERE 1=1"
+    params = []
+    if active_only:
+        query += " AND active = 1"
+    if search:
+        query += " AND (name LIKE ? OR phone LIKE ? OR email LIKE ?)"
+        like = f"%{search}%"
+        params.extend([like, like, like])
+    query += " ORDER BY name"
+    return conn.execute(query, params).fetchall()
+
+
+def get_customer(customer_id):
+    conn = get_connection()
+    return conn.execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+
+
+def add_customer(name, email, phone, address):
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO customers (name, email, phone, address) VALUES (?, ?, ?, ?)",
+        (name.strip(), (email or "").strip(), (phone or "").strip(), (address or "").strip()),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def update_customer(customer_id, name, email, phone, address):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE customers SET name = ?, email = ?, phone = ?, address = ? WHERE id = ?",
+        (name.strip(), (email or "").strip(), (phone or "").strip(), (address or "").strip(), customer_id),
+    )
+    conn.commit()
+
+
+def set_customer_active(customer_id, active):
+    conn = get_connection()
+    conn.execute("UPDATE customers SET active = ? WHERE id = ?", (1 if active else 0, customer_id))
+    conn.commit()
+
+
+def record_customer_payment(customer_id, amount, note=""):
+    """Apply a payment against a customer's outstanding credit balance."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE customers SET credit_balance = ROUND(credit_balance - ?, 2) WHERE id = ?",
+        (amount, customer_id),
+    )
+    conn.execute(
+        "INSERT INTO customer_payments (customer_id, amount, note) VALUES (?, ?, ?)",
+        (customer_id, amount, note),
+    )
+    conn.commit()
+
+
 # ---------- Sales ----------
 
 def _next_receipt_no():
@@ -161,7 +227,7 @@ def _next_receipt_no():
     return f"INV-{seq:06d}"
 
 
-def create_sale(cart_items, discount, tax_rate, payment_method, amount_tendered):
+def create_sale(cart_items, discount, tax_rate, payment_method, amount_tendered, customer_id=None):
     """cart_items: list of dicts {product_id, name, unit_price, qty}"""
     conn = get_connection()
     subtotal = sum(item["unit_price"] * item["qty"] for item in cart_items)
@@ -175,11 +241,17 @@ def create_sale(cart_items, discount, tax_rate, payment_method, amount_tendered)
     receipt_no = _next_receipt_no()
     cur = conn.execute(
         """INSERT INTO sales
-           (receipt_no, subtotal, discount, tax, total, payment_method, amount_tendered, change_due)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (receipt_no, subtotal, discount, tax, total, payment_method, amount_tendered, change_due),
+           (receipt_no, subtotal, discount, tax, total, payment_method, amount_tendered, change_due, customer_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (receipt_no, subtotal, discount, tax, total, payment_method, amount_tendered, change_due, customer_id),
     )
     sale_id = cur.lastrowid
+
+    if customer_id is not None and payment_method == "အကြွေးရောင်း":
+        conn.execute(
+            "UPDATE customers SET credit_balance = ROUND(credit_balance + ?, 2) WHERE id = ?",
+            (total, customer_id),
+        )
 
     for item in cart_items:
         line_total = round(item["unit_price"] * item["qty"], 2)
@@ -205,6 +277,7 @@ def create_sale(cart_items, discount, tax_rate, payment_method, amount_tendered)
         "payment_method": payment_method,
         "amount_tendered": amount_tendered,
         "change_due": change_due,
+        "customer_id": customer_id,
     }
 
 
@@ -222,10 +295,40 @@ def list_sales(start_date=None, end_date=None):
     return conn.execute(query, params).fetchall()
 
 
+def list_sales_with_item_counts(start_date=None, end_date=None):
+    """Same as list_sales, but with an item_count column computed in one
+    query instead of a separate get_sale() round-trip per row."""
+    conn = get_connection()
+    query = """
+        SELECT s.*, COALESCE(SUM(si.qty), 0) AS item_count
+        FROM sales s
+        LEFT JOIN sale_items si ON si.sale_id = s.id
+        WHERE 1=1
+    """
+    params = []
+    if start_date:
+        query += " AND date(s.created_at) >= date(?)"
+        params.append(start_date)
+    if end_date:
+        query += " AND date(s.created_at) <= date(?)"
+        params.append(end_date)
+    query += " GROUP BY s.id ORDER BY s.created_at DESC"
+    return conn.execute(query, params).fetchall()
+
+
 def get_sale(sale_id):
     conn = get_connection()
     sale = conn.execute("SELECT * FROM sales WHERE id = ?", (sale_id,)).fetchone()
     items = conn.execute("SELECT * FROM sale_items WHERE sale_id = ?", (sale_id,)).fetchall()
+    return sale, items
+
+
+def get_last_sale():
+    conn = get_connection()
+    sale = conn.execute("SELECT * FROM sales ORDER BY id DESC LIMIT 1").fetchone()
+    if not sale:
+        return None, []
+    items = conn.execute("SELECT * FROM sale_items WHERE sale_id = ?", (sale["id"],)).fetchall()
     return sale, items
 
 

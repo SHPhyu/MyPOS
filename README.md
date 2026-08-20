@@ -1,10 +1,16 @@
-# MyPOS
+# သြဇာ (MyPOS)
 
-A simple offline desktop point-of-sale app for a retail store, built with Python (Tkinter + SQLite). No internet connection or extra installs required.
+An offline desktop point-of-sale app for a general store in Myanmar, built with Python (CustomTkinter + SQLite), in Burmese, priced in Kyat. No internet connection required.
 
 ## Running
 
-Double-click `run.bat`, or from a terminal:
+Install the one dependency (only needed once per machine — including on the tablet):
+
+```bash
+pip install -r requirements.txt
+```
+
+Then double-click `run.bat`, or from a terminal:
 
 ```bash
 python main.py
@@ -27,7 +33,8 @@ main.py              entry point
 pos/db.py             SQLite schema + connection + demo seed data
 pos/dao.py             all database queries (products, sales, reports, settings)
 pos/app.py              main window, sidebar navigation
-pos/style.py             ttk theme
+pos/theme.py             color palette + fonts
+pos/widgets.py            shared CustomTkinter widgets (e.g. DataTable)
 pos/receipt.py            receipt text + print/save
 pos/views/                one file per screen
 data/pos.db                the database (created on first run)

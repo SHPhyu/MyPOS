@@ -10,6 +10,25 @@ CREATE TABLE IF NOT EXISTS categories (
     name TEXT NOT NULL UNIQUE
 );
 
+CREATE TABLE IF NOT EXISTS customers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT,
+    phone TEXT,
+    address TEXT,
+    credit_balance REAL NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS customer_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    amount REAL NOT NULL,
+    note TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
 CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     sku TEXT UNIQUE,
@@ -21,7 +40,7 @@ CREATE TABLE IF NOT EXISTS products (
     stock_qty INTEGER NOT NULL DEFAULT 0,
     low_stock_threshold INTEGER NOT NULL DEFAULT 5,
     active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE TABLE IF NOT EXISTS sales (
@@ -34,7 +53,8 @@ CREATE TABLE IF NOT EXISTS sales (
     payment_method TEXT NOT NULL,
     amount_tendered REAL,
     change_due REAL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE TABLE IF NOT EXISTS sale_items (
@@ -52,7 +72,7 @@ CREATE TABLE IF NOT EXISTS stock_adjustments (
     product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     delta INTEGER NOT NULL,
     reason TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -62,10 +82,10 @@ CREATE TABLE IF NOT EXISTS settings (
 """
 
 DEFAULT_SETTINGS = {
-    "store_name": "My Store",
-    "currency_symbol": "$",
+    "store_name": "သြဇာ",
+    "currency_symbol": "Ks",
     "tax_rate": "0",
-    "receipt_footer": "Thank you for your purchase!",
+    "receipt_footer": "ဝယ်ယူအားပေးမှုအတွက် ကျေးဇူးတင်ပါသည်။",
     "next_receipt_seq": "1",
 }
 
@@ -90,7 +110,18 @@ def init_db():
             "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value)
         )
     conn.commit()
+    _migrate_schema(conn)
     _seed_demo_data(conn)
+
+
+def _migrate_schema(conn):
+    """Add columns to tables that already existed before this field was introduced."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(sales)")}
+    if "customer_id" not in columns:
+        conn.execute(
+            "ALTER TABLE sales ADD COLUMN customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL"
+        )
+        conn.commit()
 
 
 def _seed_demo_data(conn):
@@ -98,21 +129,21 @@ def _seed_demo_data(conn):
     if count > 0:
         return
 
-    categories = ["Beverages", "Snacks", "Household", "Produce"]
+    categories = ["အချိုရည်", "မုန့်ခြောက်", "အိမ်သုံးပစ္စည်း", "စျေးသီးနှံ"]
     cat_ids = {}
     for name in categories:
         cur = conn.execute("INSERT INTO categories (name) VALUES (?)", (name,))
         cat_ids[name] = cur.lastrowid
 
     demo_products = [
-        ("SKU-1001", "0001", "Bottled Water 500ml", "Beverages", 1.25, 0.50, 50),
-        ("SKU-1002", "0002", "Cola Can 330ml", "Beverages", 1.75, 0.70, 40),
-        ("SKU-1003", "0003", "Potato Chips", "Snacks", 2.50, 1.10, 30),
-        ("SKU-1004", "0004", "Chocolate Bar", "Snacks", 1.99, 0.80, 45),
-        ("SKU-1005", "0005", "Paper Towels", "Household", 4.99, 2.50, 20),
-        ("SKU-1006", "0006", "Dish Soap", "Household", 3.49, 1.60, 15),
-        ("SKU-1007", "0007", "Bananas (bunch)", "Produce", 1.50, 0.60, 25),
-        ("SKU-1008", "0008", "Apples (bag)", "Produce", 3.99, 1.80, 18),
+        ("SKU-1001", "0001", "ရေသန့်ဗူး 500ml", "အချိုရည်", 500, 300, 50),
+        ("SKU-1002", "0002", "ကိုကာကိုလာ 330ml", "အချိုရည်", 900, 650, 40),
+        ("SKU-1003", "0003", "အာလူးချစ်", "မုန့်ခြောက်", 1500, 1000, 30),
+        ("SKU-1004", "0004", "ချောကလက်ဘား", "မုန့်ခြောက်", 1200, 800, 45),
+        ("SKU-1005", "0005", "တစ်ရှူးစက္ကူလိပ်", "အိမ်သုံးပစ္စည်း", 2800, 2000, 20),
+        ("SKU-1006", "0006", "ပန်းကန်ဆေးရည်", "အိမ်သုံးပစ္စည်း", 2200, 1500, 15),
+        ("SKU-1007", "0007", "ငှက်ပျောသီး (တစ်ခိုင်)", "စျေးသီးနှံ", 1500, 900, 25),
+        ("SKU-1008", "0008", "ပန်းသီး (တစ်ထုပ်)", "စျေးသီးနှံ", 3500, 2200, 18),
     ]
     for sku, barcode, name, cat, price, cost, stock in demo_products:
         conn.execute(

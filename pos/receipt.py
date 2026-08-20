@@ -1,28 +1,28 @@
 import os
 import tempfile
-import tkinter as tk
-from tkinter import ttk
+
+import customtkinter as ctk
 
 from . import dao
+from . import theme
 
 LINE_WIDTH = 40
 
 
-def _money(value, symbol):
-    return f"{symbol}{value:,.2f}"
+def _money(value):
+    return dao.format_money(value)
 
 
 def build_receipt_text(sale, items):
     settings = dao.get_settings()
-    symbol = settings.get("currency_symbol", "$")
-    store_name = settings.get("store_name", "My Store")
-    footer = settings.get("receipt_footer", "Thank you!")
+    store_name = settings.get("store_name", "သြဇာ")
+    footer = settings.get("receipt_footer", "ကျေးဇူးတင်ပါသည်။")
 
     lines = []
     lines.append(store_name.center(LINE_WIDTH))
     lines.append("=" * LINE_WIDTH)
-    lines.append(f"Receipt: {sale['receipt_no']}")
-    lines.append(f"Date:    {sale['created_at'] if 'created_at' in sale.keys() else ''}")
+    lines.append(f"ဘောက်ချာအမှတ်: {sale['receipt_no']}")
+    lines.append(f"ရက်စွဲ:       {sale['created_at'] if 'created_at' in sale.keys() else ''}")
     lines.append("-" * LINE_WIDTH)
 
     for item in items:
@@ -32,21 +32,21 @@ def build_receipt_text(sale, items):
         total = item["line_total"]
         header = f"{name}"
         lines.append(header[:LINE_WIDTH])
-        detail = f"  {qty} x {_money(unit, symbol)}"
-        lines.append(f"{detail:<28}{_money(total, symbol):>12}")
+        detail = f"  {qty} x {_money(unit)}"
+        lines.append(f"{detail:<24}{_money(total):>16}")
 
     lines.append("-" * LINE_WIDTH)
-    lines.append(f"{'Subtotal':<28}{_money(sale['subtotal'], symbol):>12}")
+    lines.append(f"{'ခွဲစုစုပေါင်း':<24}{_money(sale['subtotal']):>16}")
     if sale["discount"]:
-        lines.append(f"{'Discount':<28}{'-' + _money(sale['discount'], symbol):>12}")
+        lines.append(f"{'လျှော့စျေး':<24}{'-' + _money(sale['discount']):>16}")
     if sale["tax"]:
-        lines.append(f"{'Tax':<28}{_money(sale['tax'], symbol):>12}")
-    lines.append(f"{'TOTAL':<28}{_money(sale['total'], symbol):>12}")
+        lines.append(f"{'အခွန်':<24}{_money(sale['tax']):>16}")
+    lines.append(f"{'စုစုပေါင်းကျသင့်ငွေ':<24}{_money(sale['total']):>16}")
     lines.append("")
-    lines.append(f"Payment: {sale['payment_method']}")
+    lines.append(f"ငွေပေးချေမှုပုံစံ: {sale['payment_method']}")
     if sale["amount_tendered"] is not None:
-        lines.append(f"{'Tendered':<28}{_money(sale['amount_tendered'], symbol):>12}")
-        lines.append(f"{'Change':<28}{_money(sale['change_due'], symbol):>12}")
+        lines.append(f"{'ပေးချေငွေ':<24}{_money(sale['amount_tendered']):>16}")
+        lines.append(f"{'ပြန်အမ်းငွေ':<24}{_money(sale['change_due']):>16}")
 
     lines.append("=" * LINE_WIDTH)
     lines.append(footer.center(LINE_WIDTH))
@@ -57,25 +57,25 @@ def build_receipt_text(sale, items):
 def show_receipt_window(parent, sale, items):
     text = build_receipt_text(sale, items)
 
-    win = tk.Toplevel(parent)
-    win.title(f"Receipt {sale['receipt_no']}")
+    win = ctk.CTkToplevel(parent)
+    win.title(f"ဘောက်ချာ {sale['receipt_no']}")
     win.geometry("420x600")
-    win.configure(bg="#ffffff")
+    win.configure(fg_color=theme.BG_APP)
 
-    frame = ttk.Frame(win, padding=12)
-    frame.pack(fill="both", expand=True)
+    frame = ctk.CTkFrame(win, fg_color="transparent")
+    frame.pack(fill="both", expand=True, padx=14, pady=14)
 
-    txt = tk.Text(frame, font=("Consolas", 10), wrap="none")
+    txt = ctk.CTkTextbox(frame, font=theme.mono_font(11), fg_color=theme.BG_CARD, text_color=theme.TEXT_DARK, wrap="none")
     txt.insert("1.0", text)
     txt.configure(state="disabled")
     txt.pack(fill="both", expand=True)
 
-    btn_frame = ttk.Frame(frame)
+    btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
     btn_frame.pack(fill="x", pady=(10, 0))
 
     def do_print():
         fd, path = tempfile.mkstemp(suffix=".txt", prefix="receipt_")
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
         try:
             os.startfile(path, "print")
@@ -85,10 +85,10 @@ def show_receipt_window(parent, sale, items):
     def do_close():
         win.destroy()
 
-    ttk.Button(btn_frame, text="Print", command=do_print).pack(side="left")
-    ttk.Button(btn_frame, text="Close", style="Secondary.TButton", command=do_close).pack(
-        side="right"
-    )
+    ctk.CTkButton(btn_frame, text="ပရင့်ထုတ်ရန်", fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER,
+                  command=do_print).pack(side="left")
+    ctk.CTkButton(btn_frame, text="ပိတ်ရန်", fg_color=theme.ROW_ALT, text_color=theme.TEXT_DARK,
+                  hover_color=theme.BORDER, command=do_close).pack(side="right")
 
     win.transient(parent)
     win.grab_set()

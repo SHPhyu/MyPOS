@@ -1,75 +1,71 @@
 import tkinter as tk
-from tkinter import ttk
+
+import customtkinter as ctk
 
 from .. import dao
+from .. import theme
 from ..receipt import show_receipt_window
+from ..widgets import DataTable
 
 
-class SalesView(ttk.Frame):
+class SalesView(ctk.CTkFrame):
     def __init__(self, parent, app):
-        super().__init__(parent, style="Panel.TFrame", padding=16)
+        super().__init__(parent, fg_color=theme.BG_APP, corner_radius=0)
         self.app = app
         self._build_ui()
         self.refresh()
 
     def _build_ui(self):
-        self.columnconfigure(0, weight=1)
-        self.rowconfigure(2, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(2, weight=1)
 
-        header = ttk.Label(self, text="Sales History", style="Heading.TLabel")
-        header.grid(row=0, column=0, sticky="w", pady=(0, 12))
+        header = ctk.CTkLabel(self, text="ရောင်းအားမှတ်တမ်း", font=theme.font(20, "bold"), text_color=theme.TEXT_DARK)
+        header.grid(row=0, column=0, sticky="w", padx=20, pady=(20, 12))
 
-        toolbar = ttk.Frame(self, style="Panel.TFrame")
-        toolbar.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        toolbar = ctk.CTkFrame(self, fg_color="transparent")
+        toolbar.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 10))
 
-        ttk.Label(toolbar, text="From").pack(side="left")
+        ctk.CTkLabel(toolbar, text="ရက်စွဲမှ", text_color=theme.TEXT_DARK).pack(side="left")
         self.start_var = tk.StringVar(value=dao.days_ago_str(30))
-        ttk.Entry(toolbar, textvariable=self.start_var, width=12).pack(side="left", padx=(4, 12))
+        ctk.CTkEntry(toolbar, textvariable=self.start_var, width=110, height=34).pack(side="left", padx=(6, 14))
 
-        ttk.Label(toolbar, text="To").pack(side="left")
+        ctk.CTkLabel(toolbar, text="ရက်စွဲအထိ", text_color=theme.TEXT_DARK).pack(side="left")
         self.end_var = tk.StringVar(value=dao.today_str())
-        ttk.Entry(toolbar, textvariable=self.end_var, width=12).pack(side="left", padx=(4, 12))
+        ctk.CTkEntry(toolbar, textvariable=self.end_var, width=110, height=34).pack(side="left", padx=(6, 14))
 
-        ttk.Button(toolbar, text="Filter", command=self.refresh).pack(side="left")
-        ttk.Label(toolbar, text="(dates as YYYY-MM-DD)", style="Muted.TLabel").pack(side="left", padx=(10, 0))
+        ctk.CTkButton(toolbar, text="စစ်ထုတ်ရန်", fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER,
+                      height=34, command=self.refresh).pack(side="left")
+        ctk.CTkLabel(toolbar, text="(ရက်စွဲပုံစံ YYYY-MM-DD)", font=theme.font(11), text_color=theme.TEXT_MUTED).pack(
+            side="left", padx=(10, 0)
+        )
 
-        columns = ("receipt", "date", "items", "total", "payment")
-        self.tree = ttk.Treeview(self, columns=columns, show="headings", selectmode="browse")
-        headings = {"receipt": "Receipt #", "date": "Date", "items": "Items", "total": "Total", "payment": "Payment"}
-        widths = {"receipt": 120, "date": 160, "items": 70, "total": 90, "payment": 100}
-        for col in columns:
-            self.tree.heading(col, text=headings[col])
-            self.tree.column(col, width=widths[col], anchor="center")
-        self.tree.grid(row=2, column=0, sticky="nsew")
-        self.tree.bind("<Double-1>", lambda e: self._view_receipt())
+        columns = [
+            {"key": "receipt_no", "heading": "ဘောက်ချာအမှတ်", "width": 120, "anchor": "center"},
+            {"key": "created_at", "heading": "ရက်စွဲ", "width": 150, "anchor": "center"},
+            {"key": "item_count", "heading": "ပစ္စည်းအရေအတွက်", "width": 110, "anchor": "center"},
+            {"key": "total", "heading": "စုစုပေါင်း", "width": 100, "anchor": "e", "format": dao.format_money},
+            {"key": "payment_method", "heading": "ငွေပေးချေမှုပုံစံ", "width": 140, "anchor": "center"},
+        ]
+        self.table = DataTable(self, columns=columns, on_double_click=lambda row: self._view_receipt())
+        self.table.grid(row=2, column=0, sticky="nsew", padx=20)
 
-        actions = ttk.Frame(self, style="Panel.TFrame")
-        actions.grid(row=3, column=0, sticky="ew", pady=(10, 0))
-        ttk.Button(actions, text="View / Reprint Receipt", style="Secondary.TButton", command=self._view_receipt).pack(side="left")
+        actions = ctk.CTkFrame(self, fg_color="transparent")
+        actions.grid(row=3, column=0, sticky="ew", padx=20, pady=(10, 20))
+        ctk.CTkButton(actions, text="ဘောက်ချာကြည့်ရန် / ပြန်ထုတ်ရန်", fg_color=theme.ROW_ALT, text_color=theme.TEXT_DARK,
+                      hover_color=theme.BORDER, command=self._view_receipt).pack(side="left")
 
     def on_show(self):
         self.refresh()
 
     def refresh(self):
-        for row in self.tree.get_children():
-            self.tree.delete(row)
-
-        symbol = dao.get_setting("currency_symbol", "$")
         start = self.start_var.get().strip() or None
         end = self.end_var.get().strip() or None
-        for s in dao.list_sales(start, end):
-            _, items = dao.get_sale(s["id"])
-            item_count = sum(i["qty"] for i in items)
-            self.tree.insert(
-                "", "end", iid=str(s["id"]),
-                values=(s["receipt_no"], s["created_at"], item_count, f"{symbol}{s['total']:.2f}", s["payment_method"]),
-            )
+        self.table.set_rows(dao.list_sales_with_item_counts(start, end))
 
     def _view_receipt(self):
-        selection = self.tree.selection()
-        if not selection:
+        row = self.table.get_selected()
+        if not row:
             return
-        sale_id = int(selection[0])
-        sale, items = dao.get_sale(sale_id)
+        sale, items = dao.get_sale(row["id"])
         if sale:
             show_receipt_window(self, sale, items)

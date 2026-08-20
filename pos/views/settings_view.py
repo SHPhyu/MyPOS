@@ -1,22 +1,26 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
+
+import customtkinter as ctk
 
 from .. import dao
+from .. import theme
 
 
-class SettingsView(ttk.Frame):
+class SettingsView(ctk.CTkFrame):
     def __init__(self, parent, app):
-        super().__init__(parent, style="Panel.TFrame", padding=16)
+        super().__init__(parent, fg_color=theme.BG_APP, corner_radius=0)
         self.app = app
         self._build_ui()
         self.load()
 
     def _build_ui(self):
-        header = ttk.Label(self, text="Settings", style="Heading.TLabel")
-        header.pack(anchor="w", pady=(0, 16))
+        header = ctk.CTkLabel(self, text="ဆက်တင်များ", font=theme.font(20, "bold"), text_color=theme.TEXT_DARK)
+        header.pack(anchor="w", padx=20, pady=(20, 16))
 
-        card = ttk.Frame(self, style="Card.TFrame", padding=20)
-        card.pack(anchor="w", fill="x")
+        card = ctk.CTkFrame(self, fg_color=theme.BG_CARD, corner_radius=theme.RADIUS)
+        card.pack(anchor="w", fill="x", padx=20)
+        card.grid_columnconfigure(1, weight=1)
 
         self.store_name_var = tk.StringVar()
         self.currency_var = tk.StringVar()
@@ -24,40 +28,40 @@ class SettingsView(ttk.Frame):
         self.footer_var = tk.StringVar()
 
         rows = [
-            ("Store name", self.store_name_var),
-            ("Currency symbol", self.currency_var),
-            ("Tax rate (%)", self.tax_rate_var),
-            ("Receipt footer text", self.footer_var),
+            ("ဆိုင်အမည်", self.store_name_var),
+            ("ငွေကြေးအမှတ်အသား", self.currency_var),
+            ("အခွန်နှုန်း (%)", self.tax_rate_var),
+            ("ဘောက်ချာအောက်ခြေစာသား", self.footer_var),
         ]
         for i, (label, var) in enumerate(rows):
-            ttk.Label(card, text=label, style="Card.TLabel").grid(row=i, column=0, sticky="w", pady=8)
-            ttk.Entry(card, textvariable=var, width=36).grid(row=i, column=1, sticky="ew", pady=8, padx=(12, 0))
-        card.columnconfigure(1, weight=1)
+            ctk.CTkLabel(card, text=label, text_color=theme.TEXT_DARK).grid(row=i, column=0, sticky="w", padx=(20, 12), pady=12)
+            ctk.CTkEntry(card, textvariable=var, width=340, height=36).grid(row=i, column=1, sticky="ew", padx=(0, 20), pady=12)
 
-        ttk.Button(self, text="Save Settings", command=self._save).pack(anchor="w", pady=(16, 0))
+        ctk.CTkButton(self, text="ဆက်တင်များ သိမ်းမည်", fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER,
+                      height=40, command=self._save).pack(anchor="w", padx=20, pady=(16, 0))
 
     def on_show(self):
         self.load()
 
     def load(self):
         settings = dao.get_settings()
-        self.store_name_var.set(settings.get("store_name", "My Store"))
-        self.currency_var.set(settings.get("currency_symbol", "$"))
+        self.store_name_var.set(settings.get("store_name", "သြဇာ"))
+        self.currency_var.set(settings.get("currency_symbol", "Ks"))
         self.tax_rate_var.set(settings.get("tax_rate", "0"))
-        self.footer_var.set(settings.get("receipt_footer", "Thank you!"))
+        self.footer_var.set(settings.get("receipt_footer", "ကျေးဇူးတင်ပါသည်။"))
 
     def _save(self):
         try:
             float(self.tax_rate_var.get())
         except ValueError:
-            messagebox.showwarning("Invalid tax rate", "Tax rate must be a number.")
+            messagebox.showwarning("အခွန်နှုန်းမှားနေပါသည်", "အခွန်နှုန်းသည် ဂဏန်းဖြစ်ရပါမည်။")
             return
 
         dao.update_settings({
-            "store_name": self.store_name_var.get().strip() or "My Store",
-            "currency_symbol": self.currency_var.get().strip() or "$",
+            "store_name": self.store_name_var.get().strip() or "သြဇာ",
+            "currency_symbol": self.currency_var.get().strip() or "Ks",
             "tax_rate": self.tax_rate_var.get().strip() or "0",
             "receipt_footer": self.footer_var.get().strip(),
         })
         self.app.refresh_title()
-        messagebox.showinfo("Saved", "Settings updated.")
+        messagebox.showinfo("သိမ်းဆည်းပြီးပါပြီ", "ဆက်တင်များကို အပ်ဒိတ်လုပ်ပြီးပါပြီ။")
