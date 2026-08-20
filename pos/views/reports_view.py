@@ -4,6 +4,7 @@ import customtkinter as ctk
 
 from .. import dao
 from .. import theme
+from ..widgets import ScreenHeader
 
 RANGE_LABELS = ["ယနေ့", "လွန်ခဲ့သော ၇ ရက်", "လွန်ခဲ့သော ၃၀ ရက်"]
 
@@ -19,7 +20,7 @@ class ReportsView(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
 
-        header = ctk.CTkLabel(self, text="အစီရင်ခံစာများ", font=theme.font(20, "bold"), text_color=theme.TEXT_DARK)
+        header = ScreenHeader(self, self.app, "အစီရင်ခံစာများ")
         header.grid(row=0, column=0, sticky="w", padx=20, pady=(20, 12))
 
         toolbar = ctk.CTkFrame(self, fg_color="transparent")

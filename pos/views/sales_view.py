@@ -5,7 +5,7 @@ import customtkinter as ctk
 from .. import dao
 from .. import theme
 from ..receipt import show_receipt_window
-from ..widgets import DataTable
+from ..widgets import DataTable, ScreenHeader
 
 
 class SalesView(ctk.CTkFrame):
@@ -19,7 +19,7 @@ class SalesView(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
 
-        header = ctk.CTkLabel(self, text="ရောင်းအားမှတ်တမ်း", font=theme.font(20, "bold"), text_color=theme.TEXT_DARK)
+        header = ScreenHeader(self, self.app, "ရောင်းအားမှတ်တမ်း")
         header.grid(row=0, column=0, sticky="w", padx=20, pady=(20, 12))
 
         toolbar = ctk.CTkFrame(self, fg_color="transparent")

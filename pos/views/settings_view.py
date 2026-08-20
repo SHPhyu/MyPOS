@@ -5,6 +5,7 @@ import customtkinter as ctk
 
 from .. import dao
 from .. import theme
+from ..widgets import ScreenHeader
 
 
 class SettingsView(ctk.CTkFrame):
@@ -15,7 +16,7 @@ class SettingsView(ctk.CTkFrame):
         self.load()
 
     def _build_ui(self):
-        header = ctk.CTkLabel(self, text="ဆက်တင်များ", font=theme.font(20, "bold"), text_color=theme.TEXT_DARK)
+        header = ScreenHeader(self, self.app, "ဆက်တင်များ")
         header.pack(anchor="w", padx=20, pady=(20, 16))
 
         card = ctk.CTkFrame(self, fg_color=theme.BG_CARD, corner_radius=theme.RADIUS)

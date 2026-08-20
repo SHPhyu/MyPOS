@@ -145,6 +145,14 @@ class DataTable(ctk.CTkFrame):
             return None
         return self.rows_data[self.selected_index]
 
+    def select_index(self, index):
+        """Re-select a row by position after a refresh — used so repeated
+        +/- taps on the same cart line don't lose the selection every
+        time set_rows() rebuilds the table."""
+        if index is None or index < 0 or index >= len(self.row_widgets):
+            return
+        self._select(index)
+
     def clear_selection(self):
         if self.selected_index is not None and self.selected_index < len(self.row_widgets):
             prev_frame, prev_tag = self.row_widgets[self.selected_index]
@@ -155,3 +163,18 @@ class DataTable(ctk.CTkFrame):
 class SectionHeading(ctk.CTkLabel):
     def __init__(self, master, text, **kwargs):
         super().__init__(master, text=text, font=theme.font(18, "bold"), text_color=theme.TEXT_DARK, **kwargs)
+
+
+class ScreenHeader(ctk.CTkFrame):
+    """Title row with a 'back to Checkout' button — every Manager screen
+    uses this since Checkout is the only permanent screen now."""
+
+    def __init__(self, master, app, title, **kwargs):
+        super().__init__(master, fg_color="transparent", **kwargs)
+        ctk.CTkButton(
+            self, text="← ရောင်းချမည်", font=theme.font(12, "bold"), height=32, width=110,
+            fg_color=theme.ROW_ALT, text_color=theme.TEXT_DARK, hover_color=theme.BORDER,
+            corner_radius=theme.RADIUS_SMALL,
+            command=lambda: app.show_view("pos"),
+        ).pack(side="left", padx=(0, 12))
+        ctk.CTkLabel(self, text=title, font=theme.font(20, "bold"), text_color=theme.TEXT_DARK).pack(side="left")

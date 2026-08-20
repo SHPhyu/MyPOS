@@ -3,8 +3,7 @@ import customtkinter as ctk
 from . import dao
 from . import theme
 
-NAV_ITEMS = [
-    ("pos", "ရောင်းချမည်"),
+MANAGER_ITEMS = [
     ("products", "ကုန်ပစ္စည်းများ"),
     ("customers", "ဖောက်သည်များ"),
     ("sales", "ရောင်းအားမှတ်တမ်း"),
@@ -34,6 +33,11 @@ def _view_factories():
 
 
 class PosApp(ctk.CTk):
+    """Checkout is the only permanent screen — everything else (Products,
+    Customers, Sales History, Reports, Settings) is reached through the
+    "Manager" tool on the Checkout screen and always returns to Checkout.
+    """
+
     def __init__(self):
         super().__init__()
         theme.setup_theme()
@@ -44,62 +48,23 @@ class PosApp(ctk.CTk):
         self.minsize(1000, 640)
         self.configure(fg_color=theme.BG_APP)
 
-        self.grid_columnconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        self.sidebar = ctk.CTkFrame(self, fg_color=theme.BG_SIDEBAR, width=210, corner_radius=0)
-        self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_propagate(False)
-
         self.container = ctk.CTkFrame(self, fg_color=theme.BG_APP, corner_radius=0)
-        self.container.grid(row=0, column=1, sticky="nsew")
+        self.container.grid(row=0, column=0, sticky="nsew")
         self.container.grid_columnconfigure(0, weight=1)
         self.container.grid_rowconfigure(0, weight=1)
 
-        self._build_sidebar()
-
         self._view_factories = _view_factories()
         self.views = {}
-        self.nav_buttons = {}
-        self._build_nav_buttons()
 
         self.show_view("pos")
 
-    def _build_sidebar(self):
-        settings = dao.get_settings()
-        self.sidebar_title = ctk.CTkLabel(
-            self.sidebar, text=settings.get("store_name", "သြဇာ"),
-            font=theme.font(20, "bold"), text_color="#ffffff",
-        )
-        self.sidebar_title.pack(anchor="w", padx=20, pady=(24, 2))
-        ctk.CTkLabel(
-            self.sidebar, text="လက်လီရောင်းချရေးစနစ်",
-            font=theme.font(11), text_color=theme.TEXT_LIGHT,
-        ).pack(anchor="w", padx=20, pady=(0, 24))
-
-        self.nav_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        self.nav_frame.pack(fill="x", padx=12)
-
-    def _build_nav_buttons(self):
-        for key, label in NAV_ITEMS:
-            btn = ctk.CTkButton(
-                self.nav_frame, text=label, anchor="w",
-                font=theme.font(13),
-                fg_color="transparent", hover_color="#262c3b",
-                text_color=theme.TEXT_LIGHT, corner_radius=theme.RADIUS_SMALL,
-                height=42,
-                command=lambda k=key: self.show_view(k),
-            )
-            btn.pack(fill="x", pady=3)
-            self.nav_buttons[key] = btn
+    def open_manager_menu(self, parent_widget):
+        ManagerMenu(parent_widget, self)
 
     def show_view(self, key):
-        for k, btn in self.nav_buttons.items():
-            if k == key:
-                btn.configure(fg_color=theme.ACCENT, text_color="#ffffff", font=theme.font(13, "bold"))
-            else:
-                btn.configure(fg_color="transparent", text_color=theme.TEXT_LIGHT, font=theme.font(13))
-
         if key not in self.views:
             # Built on first visit, not at startup — so launching the app
             # only ever pays for the screen you're actually looking at.
@@ -114,7 +79,46 @@ class PosApp(ctk.CTk):
     def refresh_title(self):
         settings = dao.get_settings()
         self.title(f"{settings.get('store_name', 'သြဇာ')} — ရောင်းချရေးစနစ်")
-        self.sidebar_title.configure(text=settings.get("store_name", "သြဇာ"))
+
+
+class ManagerMenu(ctk.CTkToplevel):
+    """Popup replacing the old sidebar — every screen except Checkout."""
+
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self.app = app
+        self.title("မန်နေဂျာ")
+        self.geometry("320x420")
+        self.resizable(False, False)
+        self.configure(fg_color=theme.BG_APP)
+
+        frame = ctk.CTkFrame(self, fg_color="transparent")
+        frame.pack(fill="both", expand=True, padx=18, pady=18)
+
+        ctk.CTkLabel(frame, text="မန်နေဂျာ", font=theme.font(18, "bold"), text_color=theme.TEXT_DARK).pack(
+            anchor="w", pady=(0, 14)
+        )
+
+        for key, label in MANAGER_ITEMS:
+            ctk.CTkButton(
+                frame, text=label, font=theme.font(14, "bold"), height=52,
+                fg_color=theme.BG_CARD, text_color=theme.TEXT_DARK,
+                hover_color=theme.ROW_ALT, border_width=1, border_color=theme.BORDER,
+                corner_radius=theme.RADIUS, anchor="w",
+                command=lambda k=key: self._open(k),
+            ).pack(fill="x", pady=5, padx=2)
+
+        ctk.CTkButton(
+            frame, text="ပိတ်ရန်", fg_color=theme.ROW_ALT, text_color=theme.TEXT_DARK,
+            hover_color=theme.BORDER, command=self.destroy,
+        ).pack(fill="x", pady=(14, 0))
+
+        self.transient(parent)
+        self.grab_set()
+
+    def _open(self, key):
+        self.destroy()
+        self.app.show_view(key)
 
 
 def run():
